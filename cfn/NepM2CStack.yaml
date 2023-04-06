@@ -1,0 +1,240 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+AWSTemplateFormatVersion: 2010-09-09
+Description: Companion infrastructure for the patient EMPI migration blog
+Parameters:
+  InterimSourceBucket:
+    Description: "TO BE REMOVED. Until repo is public, we need to put our artifacts somewhere. create this in the same account and region."
+    Type: String
+    Default: nepm2c-working
+  Env:
+    Description: "Environment tag, e.g. prod, nonprod."
+    Default: test
+    Type: String
+    AllowedPattern: "[a-z0-9]+"
+    MaxLength: 15
+  DbInstanceType:
+    Description: Neptune DB instance type
+    Type: String
+    Default: db.r5.xlarge
+  IamAuthEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable IAM Auth for Neptune.
+  NotebookInstanceType:
+    Description: >-
+      SageMaker Notebook instance type. Please refer
+      https://aws.amazon.com/sagemaker/pricing/ for uptodate allowed instance
+      type in aws region and https://aws.amazon.com/neptune/pricing/ for
+      pricing.
+    Type: String
+    Default: ml.t3.medium
+    ConstraintDescription: Must be a valid SageMaker instance type.
+  M2CAnalysisBucket:
+    Description: Proxy/analysis bucket of M2C
+    Type: String
+    # TODO REMOVE DEFAULT
+    Default: so0050-1250dd2145b1-346782484055-us-east-1-proxy
+    MinLength: 1
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete 
+    Properties:
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256' 
+
+  NeptuneStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: "https://aws-neptune-customer-samples.s3.amazonaws.com/v2/cloudformation-templates/neptune-full-stack-nested-template.json"
+      TimeoutInMinutes: "60"
+      Parameters:
+        DbInstanceType: !Ref DbInstanceType
+        Env: !Ref Env
+        IamAuthEnabled: !Ref IamAuthEnabled
+        EC2ClientInstanceType: none
+        NotebookInstanceType: !Ref NotebookInstanceType
+        NeptuneSagemakerNotebookStartupScript:  !GetAtt Repo2S3.NotebookAddScript 
+    DependsOn: Repo2S3
+
+  Repo2S3:
+    Type: 'Custom::EnvSetup'
+    DependsOn: AWSLambdaExecutionRole
+    Properties:
+      ServiceToken: !GetAtt Repo2S3Func.Arn
+      staging_bucket: !Ref S3Bucket
+      source_bucket: !Ref InterimSourceBucket
+      m2c_analysis_bucket: !Ref M2CAnalysisBucket
+
+  Repo2S3Func:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Repo2S3Func"
+      FunctionName: !Sub "Repo2S3Func-lambda-${AWS::StackName}"
+      Handler: index.lambda_handler
+      Role: !GetAtt AWSLambdaExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.9
+      Code:
+        ZipFile: |
+          import json
+          import urllib3
+          import boto3
+          import cfnresponse
+
+          http = urllib3.PoolManager()
+          DATA_FILES = {
+            "data": ["seeddata.ttl"],
+            "notebook": ["M2CForKnowledgeGraph.ipynb"] 
+          }
+
+          def copy_s3_s3(s3_client, source_bucket, target_bucket, folder, key):
+            s3_path = folder+"/"+key
+            local_path = "/tmp/" + key
+            s3_client.download_file(source_bucket, s3_path, local_path)
+            s3_client.upload_file(Bucket = target_bucket, Key = s3_path, Filename = local_path, ExtraArgs={"ServerSideEncryption": "AES256"})
+
+          def copy_web_s3(url, s3_client, bucket, folder, key):
+            s3_path = folder+"/"+key
+            local_path = "/tmp/" + key
+            the_file = http.request('GET', url + "/" + bucket + "/" + key, preload_content=False)
+            print("Got file")
+            local_file = open(local_path, 'wb')
+            local_file.write(the_file.data)
+            local_file.close()
+            s3_client.upload_file(Bucket = bucket, Key = s3_path, Filename = local_path, ExtraArgs={"ServerSideEncryption": "AES256"})
+
+          def lambda_handler(event, context):
+            the_event = event['RequestType']
+            print(event)
+            print("The event type is: ", str(the_event))
+            response_data = {}
+            try:
+              staging_bucket = event['ResourceProperties']['staging_bucket']
+              source_bucket = event['ResourceProperties']['source_bucket']
+              m2c_bucket = event['ResourceProperties']['m2c_analysis_bucket']
+              if the_event in ('Create', 'Update'):
+                s3c = boto3.client('s3')
+                print("Creating/Updating")
+                for folder in DATA_FILES:
+                  for filename in DATA_FILES[folder]:
+                    copy_s3_s3(s3c, source_bucket, staging_bucket, folder, filename)
+                    #copy_web_s3("https://github.com/aws-samples/neptune-m2c-kg", s3c, staging_bucket, folder, filename)
+
+                response_data['Data'] = 'git success'
+                response_data['NotebookAddScript'] =  f'echo "export STAGE_BUCKET={staging_bucket}" >> ~/.bashrc\n'
+                response_data['NotebookAddScript'] +=  f'echo "export M2C_ANALYSIS_BUCKET={m2c_bucket}" >> ~/.bashrc\n'
+                response_data['NotebookAddScript'] +=  f"if [ ! -f /home/ec2-user/SageMaker/M2CForKnowledgeGraph.ipynb  ]\n"
+                response_data['NotebookAddScript'] += f"then\n"
+                response_data['NotebookAddScript'] += f"  aws s3 cp s3://{staging_bucket}/notebook/M2CForKnowledgeGraph.ipynb /home/ec2-user/SageMaker/M2CForKnowledgeGraph.ipynb\n"
+                response_data['NotebookAddScript'] += f"fi\n"
+                response_data['Data'] = 'git success'
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              elif the_event in ('Delete'):
+                print("Deleting")
+                s3r = boto3.resource('s3')
+                s3r.Bucket(str(s3_bucket)).objects.all().delete()
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              else:
+                response_data['Data'] = "Illegal event " + the_event
+                cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+            except Exception as e:
+              print("Operation failed...")
+              print(str(e))
+              response_data['Data'] = str(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+  AWSLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: "2012-10-17"
+      Path: "/"
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: arn:aws:logs:*:*:*
+            Version: "2012-10-17"
+          PolicyName: !Sub "Repo2S3pol-CW-${AWS::StackName}"
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:List*
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:s3:::${S3Bucket}/*
+                  - !Sub arn:aws:s3:::${S3Bucket}
+                  - !Sub arn:aws:s3:::${InterimSourceBucket}/*
+                  - !Sub arn:aws:s3:::${InterimSourceBucket}
+                  - !Sub arn:aws:s3:::${M2CAnalysisBucket}/*
+                  - !Sub arn:aws:s3:::${M2CAnalysisBucket}
+            Version: "2012-10-17"
+          PolicyName: !Sub "Repo2S3pol-S3-${AWS::StackName}"
+      RoleName: !Sub "Repo2S3role-${AWS::StackName}"
+
+Outputs:
+  S3Bucket:
+    Value: !Ref S3Bucket
+  DBClusterEndpoint:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.DBClusterEndpoint
+  DBClusterId:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.DBClusterId
+  DBClusterPort:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.DBClusterPort
+  DBClusterResourceId:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.DBClusterResourceId
+  NeptuneLoadFromS3IAMRoleArn:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.NeptuneLoadFromS3IAMRoleArn
+  NeptuneSagemakerNotebook:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.NeptuneSagemakerNotebook
+  Subnet1:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.Subnet1
+  Subnet2:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.Subnet2
+  Subnet4:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.Subnet4
+  VPC:
+    Value: !GetAtt
+      - NeptuneStack
+      - Outputs.VPC
+
