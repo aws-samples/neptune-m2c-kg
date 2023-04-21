@@ -26,7 +26,6 @@ Parameters:
     AllowedValues:
       - 0
       - 1
-      ],
     Description: Enable Audit Log. 0 means disable and 1 means enable.
   NotebookInstanceType:
     Description: >-
