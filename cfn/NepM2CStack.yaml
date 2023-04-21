@@ -51,7 +51,8 @@ Resources:
         - ServerSideEncryptionByDefault:
             SSEAlgorithm: 'AES256' 
       Tags:
-          - neptune-m2c-kg
+          - Key: demoname
+            Value: neptune-m2c-kg
 
   NeptuneStack:
     Type: "AWS::CloudFormation::Stack"
@@ -85,7 +86,8 @@ Resources:
       Role: !GetAtt AWSLambdaExecutionRole.Arn
       Timeout: 360
       Tags:
-          - neptune-m2c-kg
+          - Key: demoname
+            Value: neptune-m2c-kg
       Runtime: python3.9
       Code:
         ZipFile: |
