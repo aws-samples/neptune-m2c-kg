@@ -39,8 +39,6 @@ Parameters:
   M2CAnalysisBucket:
     Description: Proxy/analysis bucket of M2C
     Type: String
-    # TODO REMOVE DEFAULT
-    Default: so0050-1250dd2145b1-346782484055-us-east-1-proxy
     MinLength: 1
 
 Resources:
