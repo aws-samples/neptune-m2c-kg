@@ -193,8 +193,6 @@ Resources:
                 Resource:
                   - !Sub arn:aws:s3:::${S3Bucket}/*
                   - !Sub arn:aws:s3:::${S3Bucket}
-                  - !Sub arn:aws:s3:::${InterimSourceBucket}/*
-                  - !Sub arn:aws:s3:::${InterimSourceBucket}
                   - !Sub arn:aws:s3:::${M2CAnalysisBucket}/*
                   - !Sub arn:aws:s3:::${M2CAnalysisBucket}
             Version: "2012-10-17"
