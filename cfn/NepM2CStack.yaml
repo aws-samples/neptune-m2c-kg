@@ -125,7 +125,6 @@ Resources:
             response_data = {}
             try:
               staging_bucket = event['ResourceProperties']['staging_bucket']
-              source_bucket = event['ResourceProperties']['source_bucket']
               m2c_bucket = event['ResourceProperties']['m2c_analysis_bucket']
               if the_event in ('Create', 'Update'):
                 s3c = boto3.client('s3')
