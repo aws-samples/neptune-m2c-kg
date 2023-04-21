@@ -1,12 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 AWSTemplateFormatVersion: 2010-09-09
-Description: Companion infrastructure for the patient EMPI migration blog
+Description: Companion infrastructure for M2c/Neptune blog
 Parameters:
-  InterimSourceBucket:
-    Description: "TO BE REMOVED. Until repo is public, we need to put our artifacts somewhere. create this in the same account and region."
-    Type: String
-    Default: nepm2c-working
   Env:
     Description: "Environment tag, e.g. prod, nonprod."
     Default: test
@@ -24,6 +20,14 @@ Parameters:
       - "true"
       - "false"
     Description: Enable IAM Auth for Neptune.
+  NeptuneEnableAuditLog: 
+    Type: Number
+    Default: 0,
+    AllowedValues:
+      - 0
+      - 1
+      ],
+    Description: Enable Audit Log. 0 means disable and 1 means enable.
   NotebookInstanceType:
     Description: >-
       SageMaker Notebook instance type. Please refer
@@ -43,12 +47,14 @@ Parameters:
 Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Delete 
+    DeletionPolicy: Delete
     Properties:
-        BucketEncryption:
-          ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: 'AES256' 
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: 'AES256' 
+      Tags:
+          - neptune-m2c-kg
 
   NeptuneStack:
     Type: "AWS::CloudFormation::Stack"
@@ -61,6 +67,7 @@ Resources:
         IamAuthEnabled: !Ref IamAuthEnabled
         EC2ClientInstanceType: none
         NotebookInstanceType: !Ref NotebookInstanceType
+        NeptuneEnableAuditLog: !Ref NeptuneEnableAuditLog
         NeptuneSagemakerNotebookStartupScript:  !GetAtt Repo2S3.NotebookAddScript 
     DependsOn: Repo2S3
 
@@ -70,7 +77,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt Repo2S3Func.Arn
       staging_bucket: !Ref S3Bucket
-      source_bucket: !Ref InterimSourceBucket
       m2c_analysis_bucket: !Ref M2CAnalysisBucket
 
   Repo2S3Func:
@@ -81,6 +87,8 @@ Resources:
       Handler: index.lambda_handler
       Role: !GetAtt AWSLambdaExecutionRole.Arn
       Timeout: 360
+      Tags:
+          - neptune-m2c-kg
       Runtime: python3.9
       Code:
         ZipFile: |
@@ -125,8 +133,8 @@ Resources:
                 print("Creating/Updating")
                 for folder in DATA_FILES:
                   for filename in DATA_FILES[folder]:
-                    copy_s3_s3(s3c, source_bucket, staging_bucket, folder, filename)
-                    #copy_web_s3("https://github.com/aws-samples/neptune-m2c-kg", s3c, staging_bucket, folder, filename)
+                    #copy_s3_s3(s3c, source_bucket, staging_bucket, folder, filename)
+                    copy_web_s3("https://github.com/aws-samples/neptune-m2c-kg", s3c, staging_bucket, folder, filename)
 
                 response_data['Data'] = 'git success'
                 response_data['NotebookAddScript'] =  f'echo "export STAGE_BUCKET={staging_bucket}" >> ~/.bashrc\n'
