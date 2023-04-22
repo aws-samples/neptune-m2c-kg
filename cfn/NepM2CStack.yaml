@@ -151,7 +151,7 @@ Resources:
               elif the_event in ('Delete'):
                 print("Deleting")
                 s3r = boto3.resource('s3')
-                s3r.Bucket(str(s3_bucket)).objects.all().delete()
+                s3r.Bucket(str(staging_bucket)).objects.all().delete()
                 cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
               else:
                 response_data['Data'] = "Illegal event " + the_event
