@@ -60,6 +60,7 @@ Resources:
       TemplateURL: "https://aws-neptune-customer-samples.s3.amazonaws.com/v2/cloudformation-templates/neptune-full-stack-nested-template.json"
       TimeoutInMinutes: "60"
       Parameters:
+        DBClusterId: !Join [ "-", ["m2ckg", !Join [ "", !Split [ "-", !Select [ 2,  !Split [ "/", !Ref AWS::StackId ] ] ] ] ] ]
         DbInstanceType: !Ref DbInstanceType
         Env: !Ref Env
         IamAuthEnabled: !Ref IamAuthEnabled
