@@ -112,11 +112,14 @@ Resources:
           def copy_web_s3(url, s3_client, bucket, folder, key):
             s3_path = folder+"/"+key
             local_path = "/tmp/" + key
-            the_file = http.request('GET', url + "/" + bucket + "/" + key, preload_content=False)
+            fileurl = url + "/" + folder + "/" + key
+            print("loading web file *" + fileurl + "*")
+            the_file = http.request('GET',fileurl, preload_content=False)
             print("Got file")
             local_file = open(local_path, 'wb')
             local_file.write(the_file.data)
             local_file.close()
+            print("upload *" + s3_path + "*" + local_path + "*")
             s3_client.upload_file(Bucket = bucket, Key = s3_path, Filename = local_path, ExtraArgs={"ServerSideEncryption": "AES256"})
 
           def lambda_handler(event, context):
@@ -133,7 +136,8 @@ Resources:
                 for folder in DATA_FILES:
                   for filename in DATA_FILES[folder]:
                     #copy_s3_s3(s3c, source_bucket, staging_bucket, folder, filename)
-                    copy_web_s3("https://github.com/aws-samples/neptune-m2c-kg", s3c, staging_bucket, folder, filename)
+                    copy_web_s3("https://raw.githubusercontent.com/aws-samples/neptune-m2c-kg/main", s3c, staging_bucket, folder, filename)
+                    #copy_web_s3("https://github.com/aws-samples/neptune-m2c-kg", s3c, staging_bucket, folder, filename)
 
                 response_data['Data'] = 'git success'
                 response_data['NotebookAddScript'] =  f'echo "export STAGE_BUCKET={staging_bucket}" >> ~/.bashrc\n'
